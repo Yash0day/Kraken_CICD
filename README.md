@@ -1,1 +1,1 @@
-Python Flask Calculator
+Python Flask Calculator: ADD, SUB, MUL and DIV
