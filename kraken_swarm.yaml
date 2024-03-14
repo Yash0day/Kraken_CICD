@@ -1,0 +1,229 @@
+#run docker swarm cmd -> sudo docker stack deploy -c docker-compose-swarm-patch.yaml -c kraken_swarm.yaml krakenci
+
+version: '3.12'
+
+services:
+  server:
+    image: us-docker.pkg.dev/kraken-261806/kk/kkserver:1.6.59
+    environment:
+      - MINIO_ROOT_USER=UFSEHRCFU4ACUEWHCHWU
+      - MINIO_ROOT_PASSWORD=HICSHuhIIUhiuhMIUHIUhGFfUHugy6fGJuyyfiGY
+      - KRAKEN_REDIS_ADDR=redis
+      - KRAKEN_DB_URL=postgresql://kraken:kk123@postgres:5432/kraken
+      - KRAKEN_CLICKHOUSE_PORT=9001
+      - KRAKEN_CLICKHOUSE_ADDR=clickhouse-proxy:9001
+      - KRAKEN_CLICKHOUSE_URL=http://clickhouse:8123/
+      - KRAKEN_SERVER_PORT=6363
+      - KRAKEN_SERVER_ADDR=server:6363
+      - KRAKEN_PLANNER_URL=http://controller:7997/
+      - KRAKEN_UI_PUBLIC_PORT=8080
+      - KRAKEN_MINIO_ADDR=minio:9999
+      - KRAKEN_MINIO_PORT=9999
+      - KRAKEN_MINIO_CONSOLE_PORT=9998
+
+    
+    ports:
+      - target: 6363
+        published: 6363
+        protocol: tcp
+    expose:
+      - 6363
+    networks:
+      - db_net
+      - web_net
+      - lab_net
+    depends_on:
+      - postgres
+      - controller
+      - rq
+      - clickhouse
+      - clickhouse-proxy
+    deploy:
+      restart_policy:
+        condition: any
+
+  controller:
+    image: us-docker.pkg.dev/kraken-261806/kk/kkcontroller:1.6.59
+    environment:
+      - POSTGRES_USER=kraken
+      - POSTGRES_PASSWORD=kk123
+      - POSTGRES_DB=kraken
+      - KRAKEN_REDIS_ADDR=redis
+      - KRAKEN_DB_URL=postgresql://kraken:kk123@postgres:5432/kraken
+      - KRAKEN_CLICKHOUSE_PORT=9001
+      - KRAKEN_CLICKHOUSE_ADDR=clickhouse-proxy:9001
+      - KRAKEN_CLICKHOUSE_URL=http://clickhouse:8123/
+      - KRAKEN_SERVER_PORT=6363
+      - KRAKEN_SERVER_ADDR=server:6363
+      - KRAKEN_PLANNER_URL=http://controller:7997/
+   
+    networks:
+      - db_net
+    depends_on:
+      - rq
+      - postgres
+      - clickhouse-proxy
+    deploy:
+      restart_policy:
+        condition: any
+
+  rq:
+    image: us-docker.pkg.dev/kraken-261806/kk/kkrq:1.6.59
+    environment:
+      - KRAKEN_REDIS_ADDR=redis
+      - KRAKEN_DB_URL=postgresql://kraken:kk123@postgres:5432/kraken
+      - KRAKEN_CLICKHOUSE_PORT=9001
+      - KRAKEN_CLICKHOUSE_ADDR=clickhouse-proxy:9001
+      - KRAKEN_SERVER_PORT=6363
+      - KRAKEN_SERVER_ADDR=server:6363
+      - KRAKEN_PLANNER_URL=http://controller:7997/
+      - KRAKEN_MINIO_ADDR=minio:9999
+      - MINIO_ROOT_USER=UFSEHRCFU4ACUEWHCHWU
+      - MINIO_ROOT_PASSWORD=HICSHuhIIUhiuhMIUHIUhGFfUHugy6fGJuyyfiGY
+     
+   
+    networks:
+      - db_net
+    depends_on:
+      - postgres
+      - redis
+    deploy:
+      restart_policy:
+        condition: any
+
+  agent:
+    image: us-docker.pkg.dev/kraken-261806/kk/kkagent:1.6.59
+    environment:
+      - KRAKEN_CLICKHOUSE_ADDR=clickhouse-proxy:9001
+      - KRAKEN_SERVER_ADDR=server:6363
+      - KRAKEN_AGENT_BUILTIN=1
+    
+    networks:
+      - lab_net
+    depends_on:
+      - server
+      - minio
+      - clickhouse-proxy
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    deploy:
+      restart_policy:
+        condition: any
+
+  ui:
+    image: us-docker.pkg.dev/kraken-261806/kk/kkui:1.6.59
+    environment:
+      - KRAKEN_SERVER_ADDR=server:6363
+      - KRAKEN_SERVER_PORT=6363
+    
+    ports:
+      - target: 80
+        published: 8080
+        protocol: tcp
+    networks:
+      - web_net
+    depends_on:
+      - server
+    deploy:
+      restart_policy:
+        condition: any
+
+  postgres:
+    image: postgres:11.16-bullseye
+    environment:
+      - POSTGRES_USER=kraken
+      - POSTGRES_PASSWORD=kk123
+      - POSTGRES_DB=kraken
+    
+
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    networks:
+      - db_net
+    deploy:
+      restart_policy:
+        condition: any
+
+  redis:
+    image: redis:7.0.5-alpine3.16
+    networks:
+      - db_net
+    deploy:
+      restart_policy:
+        condition: any
+
+  clickhouse:
+    image: us-docker.pkg.dev/kraken-261806/kk/clickhouse-server:22.10.2.11.1.6.59
+    volumes:
+      - clickhouse:/var/lib/clickhouse
+    ports:
+      - target: 8123
+        published: 8123
+        protocol: tcp
+      - target: 9000
+        published: 9000
+        protocol: tcp
+    networks:
+      - db_net
+    deploy:
+      restart_policy:
+        condition: any
+
+  clickhouse-proxy:
+    image: us-docker.pkg.dev/kraken-261806/kk/kkchproxy:1.6.59
+    environment:
+      - KRAKEN_CLICKHOUSE_URL=http://clickhouse:8123/
+    
+    ports:
+      - target: 9001
+        published: 9001
+        protocol: udp
+    expose:
+      - 9001
+    networks:
+      - db_net
+      - lab_net
+    depends_on:
+      - clickhouse
+    deploy:
+      restart_policy:
+        condition: any
+
+  minio:
+    image: minio/minio:RELEASE.2022-10-24T18-35-07Z
+    environment:
+      - MINIO_ROOT_USER=UFSEHRCFU4ACUEWHCHWU
+      - MINIO_ROOT_PASSWORD=HICSHuhIIUhiuhMIUHIUhGFfUHugy6fGJuyyfiGY
+   
+    command: server --address :9999 --console-address :9998 /data
+    volumes:
+      - minio:/data
+    ports:
+      - target: 9999
+        published: 9999
+        protocol: tcp
+      - target: 9998
+        published: 9998
+        protocol: tcp
+    expose:
+      - 9999
+      - 9998
+    networks:
+      - lab_net
+      - db_net
+    deploy:
+      restart_policy:
+        condition: any
+
+volumes:
+  db-data:
+  clickhouse:
+  minio:
+
+networks:
+  db_net:
+    driver: overlay
+  web_net:
+    driver: overlay
+  lab_net:
+    driver: overlay
